@@ -112,10 +112,10 @@ def main():
 		if unknown:
 			raise RuntimeError(f"Unknown labels in TSE not covered by training label set: {sorted(set(unknown))}. Provide --labels_json from training or update your label config.")
 
-	# 简化：使用随机权重模型（或在此处加载你的 checkpoint）
+	# Simplified: use a randomly initialized model (or load your own checkpoint here)
 	x0 = ds[0]["x"]
 	input_dim = x0.shape[-1]
-	# 🧠 使用注意力机制模型（与训练时保持一致）
+	# 🧠 Use the attention-based model (kept consistent with training)
 	model = BiLSTMClassifier(
 		input_dim=input_dim, 
 		hidden_dim=256, 

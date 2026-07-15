@@ -49,47 +49,47 @@ def extract_features_multichannel(
 	starts = np.arange(0, n_samples - win + 1, hop, dtype=int)
 	centers = (starts + win // 2) / float(fs)
 
-	# 🔥 OOM修复：预分配特征数组，避免动态增长
+	# 🔥 OOM fix: pre-allocate the feature array to avoid dynamic growth
 	n_frames = len(starts)
-	n_features = len(EEG_BANDS) * 2 + 2 + 2  # 5频带*2 + 宽带*2 + RMS*2 = 14
+	n_features = len(EEG_BANDS) * 2 + 2 + 2  # 5 bands*2 + broadband*2 + RMS*2 = 14
 	X = np.zeros((n_frames, n_features), dtype=np.float32)
 	
-	# 🔥 内存优化：批量处理而非逐帧
+	# 🔥 Memory optimization: batch processing instead of frame-by-frame
 	nperseg = min(win, 256)
 	for i, s in enumerate(starts.tolist()):
 		seg = signals[:, s:s + win]  # [C, win]
 		
-		# 🔥 内存优化：使用预分配数组
+		# 🔥 Memory optimization: use a pre-allocated array
 		psd_array = np.zeros((n_channels, nperseg // 2 + 1), dtype=np.float32)
 		
-		# PSD per channel - 内存优化版本
+		# PSD per channel - memory-optimized version
 		for c in range(n_channels):
 			f, p = welch(seg[c], fs=fs, nperseg=nperseg, noverlap=nperseg // 2, scaling='density')
-			psd_array[c] = p.astype(np.float32)  # 确保类型一致
+			psd_array[c] = p.astype(np.float32)  # Ensure consistent dtype
 		
-		# 直接填充特征数组
+		# Fill the feature array directly
 		feat_idx = 0
 		
-		# 频带功率 mean/std across channels
+		# Band power mean/std across channels
 		for band in EEG_BANDS.values():
 			bp = _bandpower_from_psd(f, psd_array, band)  # [C]
 			X[i, feat_idx] = np.mean(bp)
 			X[i, feat_idx + 1] = np.std(bp)
 			feat_idx += 2
 		
-		# 宽频功率
+		# Broadband power
 		broad = (0.5, 45.0)
 		bp_broad = _bandpower_from_psd(f, psd_array, broad)
 		X[i, feat_idx] = np.mean(bp_broad)
 		X[i, feat_idx + 1] = np.std(bp_broad)
 		feat_idx += 2
 		
-		# 时域 RMS mean/std
+		# Time-domain RMS mean/std
 		rms = np.sqrt(np.mean(seg.astype(np.float32) ** 2, axis=1))  # [C]
 		X[i, feat_idx] = np.mean(rms)
 		X[i, feat_idx + 1] = np.std(rms)
 		
-		# 🔥 内存优化：及时释放临时数组
+		# 🔥 Memory optimization: free temporary arrays promptly
 		del psd_array, seg, rms
 
 	return X, centers

@@ -9,8 +9,8 @@ import numpy as np
 
 
 def pair_edf_tse(data_dir: str) -> List[Tuple[str, Optional[str], str]]:
-	"""扫描目录，按 record_id 配对 .edf 和 .tse 文件。
-	返回 (edf_path, tse_path_or_None, record_id)。
+	"""Scan the directory and pair up .edf and .tse files by record_id.
+	Returns (edf_path, tse_path_or_None, record_id).
 	"""
 	files = os.listdir(data_dir)
 	edfs = {}
@@ -109,7 +109,7 @@ def merge_non_background_segments(
 	prob_threshold: float = 0.5,
 	min_duration_sec: float = 0.0,
 ) -> List[Dict]:
-	"""从每帧概率生成片段列表。"""
+	"""Generate a list of segments from per-frame probabilities."""
 	bg_idx = label_names.index(background_label)
 	fg_prob = 1.0 - probs[:, bg_idx]
 	is_fg = fg_prob >= prob_threshold
@@ -122,7 +122,7 @@ def merge_non_background_segments(
 			end = i - 1
 			dur = frame_centers_sec[end] - frame_centers_sec[start]
 			if dur >= min_duration_sec:
-				# 多数类
+				# Majority class
 				sum_probs = probs[start:end + 1].sum(axis=0)
 				cls = int(np.argmax(sum_probs))
 				segments.append({
@@ -148,7 +148,7 @@ def merge_non_background_segments(
 
 
 def normalize_label_with_alias(label: str, aliases: Optional[Dict[str, str]]) -> str:
-	"""用别名表归一化标签名（大小写不敏感）。找不到则原样返回。"""
+	"""Normalize a label name using the alias table (case-insensitive). Returns it unchanged if not found."""
 	if not aliases:
 		return label
 	return aliases.get(label.lower(), label)

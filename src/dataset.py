@@ -39,7 +39,7 @@ def _cache_key(
 
 
 class SequenceDataset:
-	"""单条记录为单位的序列数据集，含磁盘缓存与可选标准化。"""
+	"""A sequence dataset keyed by individual records, with on-disk caching and optional standardization."""
 
 	def __init__(
 		self,
@@ -135,13 +135,13 @@ class SequenceDataset:
 		Y = None
 		if tse_path and self.label_to_index is not None:
 			segments = parse_tse(tse_path)
-			# 归一化标签别名
+			# Normalize label aliases
 			if self._aliases:
 				segments = [(s, e, normalize_label_with_alias(lab, self._aliases), conf) for (s, e, lab, conf) in segments]
 			bg = list(self.label_to_index.keys())[0]
 			if self._background:
 				bg = self._background
-			# 使用重叠比例阈值与最小时长过滤做帧标注
+			# Frame labeling using the overlap-ratio threshold and minimum-duration filter
 			labels = build_frame_labels(
 				centers.tolist(),
 				self.window_sec,
@@ -150,21 +150,21 @@ class SequenceDataset:
 				overlap_ratio=float(self.label_overlap_ratio),
 				min_seg_duration=float(self.min_seg_duration),
 			)
-			# 🔧 修复：处理大小写不匹配的标签映射
+			# 🔧 Fix: handle case-mismatched label mappings
 			Y = []
 			for lab in labels:
-				# 先尝试直接匹配
+				# Try a direct match first
 				if lab in self.label_to_index:
 					Y.append(self.label_to_index[lab])
 				else:
-					# 尝试大写匹配
+					# Try an uppercase match
 					lab_upper = lab.upper()
 					if lab_upper in self.label_to_index:
 						Y.append(self.label_to_index[lab_upper])
 					else:
-						# 尝试小写匹配
+						# Try a lowercase match
 						lab_lower = lab.lower()
-						# 在label_to_index中查找小写键
+						# Look for a lowercase key in label_to_index
 						found = False
 						for key, idx in self.label_to_index.items():
 							if key.lower() == lab_lower:
@@ -179,9 +179,9 @@ class SequenceDataset:
 
 	def _apply_standardize(self, x: np.ndarray) -> np.ndarray:
 		if not self.standardize:
-			# 🔧 修复：即使没有明确启用standardize，也进行基本的数值稳定化
-			# 使用log1p变换 + 简单标准化来处理极大的数值范围
-			x_log = np.log1p(np.maximum(x, 0))  # log(1+x)，处理负值
+			# 🔧 Fix: even if standardize isn't explicitly enabled, apply basic numerical stabilization
+			# Use a log1p transform + simple standardization to handle very large value ranges
+			x_log = np.log1p(np.maximum(x, 0))  # log(1+x), handles negative values
 			x_mean = np.mean(x_log, axis=0, keepdims=True)
 			x_std = np.std(x_log, axis=0, keepdims=True)
 			x_std = np.where(x_std == 0, 1.0, x_std)
@@ -202,7 +202,7 @@ class SequenceDataset:
 		return item
 
 	def fit_and_save_stats(self, out_path: str, progress_path: Optional[str] = None):
-		"""遍历当前数据集计算特征维度均值与标准差并保存到 JSON。"""
+		"""Iterate over the current dataset to compute per-feature mean and std, and save them to JSON."""
 		done = set()
 		acc_sum = None
 		acc_sq = None

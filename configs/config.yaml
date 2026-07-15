@@ -1,96 +1,95 @@
 train:
-  # 训练/评估所用的数据根目录，需包含 .edf 与同名 .tse
+  # Root data directory used for training/evaluation; must contain .edf files with matching .tse files
   data_dir: data/Dataset_train_dev
-  # 特征缓存目录（自动生成 .npz 加速重用）
+  # Feature cache directory (auto-generates .npz files to speed up reuse)
   cache_dir: data_cache
-  # 特征滑窗长度（秒）
+  # Feature sliding-window length (seconds)
   window_sec: 2.0
-  # 特征滑窗步长（秒）
+  # Feature sliding-window hop length (seconds)
   hop_sec: 0.25
-  # 读取 EDF 后统一重采样到的采样率（Hz）
+  # Sampling rate to resample to uniformly after reading the EDF (Hz)
   resample_hz: 256.0
-  # 预处理带通/高通/低通范围（None 表示不启用），默认 EEG 常用 0.5–45Hz
+  # Preprocessing bandpass/highpass/lowpass range (None means disabled); default is the common EEG range 0.5-45Hz
   bandpass: [0.5, 45.0]
-  # 工频陷波（50 或 60，None 表示不启用）
+  # Mains notch filter (50 or 60; None means disabled)
   notch_hz: 50.0
-  # 背景类标签名（需与 .tse 一致或在别名中可映射）
+  # Background class label name (must match `.tse` or be mappable via the alias table)
   bg_label: bckg
   
-  # 🔧 内存优化：极低batch_size避免OOM
-  batch_size: 1  # 进一步降低到1，必要时可考虑梯度累积
-  # 训练轮数
+  # 🔧 Memory optimization: extremely low batch_size to avoid OOM
+  batch_size: 1  # Lowered further to 1; consider gradient accumulation if needed
+  # Number of training epochs
   epochs: 20
-  # 验证比例（仅用于非 LOSOCV 随机按人划分流程；LOSO 流程不使用该参数）
+  # Validation ratio (only used for the non-LOSOCV random per-patient split flow; not used by the LOSO flow)
   val_ratio: 0.2
-  # 随机种子
+  # Random seed
   seed: 42
-  # 输出目录（日志/权重/TensorBoard）
+  # Output directory (logs/weights/TensorBoard)
   out_dir: outputs
   
-  # 🔧 内存优化：降低并发减少内存占用
-  num_workers: 0  # 减少到0，避免多进程内存开销
-  # 缓存策略：关闭预计算减少内存占用
-  precompute_cache: none  # 关闭预计算，减少内存占用
-  # 终端训练进度显示（none|bar）与日志间隔（iter 级日志默认关闭，epoch 汇总总会打印）
+  # 🔧 Memory optimization: lower concurrency to reduce memory usage
+  num_workers: 0  # Lowered to 0 to avoid multiprocessing memory overhead
+  # Caching strategy: disable precomputation to reduce memory usage
+  precompute_cache: none  # Precomputation disabled to reduce memory usage
+  # Terminal training-progress display (none|bar) and log interval (per-iteration logging is off by default; epoch summaries are always printed)
   progress: bar
   log_interval: 0
-  # 训练时显示当前折训练集缓存进度条（需要 progress: bar）
+  # Show a cache-building progress bar for the current fold's training set (requires progress: bar)
   cache_progress: true
-  # 是否在训练前先做一次基线验证（默认关闭）
+  # Whether to run one baseline validation pass before training starts (off by default)
   eval_at_start: false
-  # 学习率调度与数据增强默认值
-  # scheduler: 学习率调度策略（none|cosine|onecycle）
+  # Default learning-rate scheduling and data-augmentation settings
+  # scheduler: learning-rate scheduling strategy (none|cosine|onecycle)
   scheduler: onecycle  # none|cosine|onecycle
-  # 🚀 注意力机制优化：适当提高学习率
-  max_lr: 0.0003  # 注意力机制训练稳定，可以提高学习率
-  # 当 labels 未配置 Excel/labels.json 时，自动从 TSE 中推导标签集合
+  # 🚀 Attention-mechanism optimization: learning rate raised somewhat
+  max_lr: 0.0003  # Attention-based training is stable, so the learning rate can be raised
+  # If labels doesn't configure an Excel/labels.json, the label set is auto-derived from the TSE files
   auto_labels_from_tse: true
-  # 🔧 内存优化：增加梯度累积补偿极小batch
-  gradient_accumulation_steps: 8  # 模拟batch_size=8的效果
-  # 梯度裁剪阈值（0 表示不裁剪）
+  # 🔧 Memory optimization: increase gradient accumulation to compensate for the very small batch size
+  gradient_accumulation_steps: 8  # Simulates the effect of batch_size=8
+  # Gradient clipping threshold (0 means no clipping)
   clip_grad: 1.0
   
-  # 🧠 内存优化：减小模型参数避免OOM
-  # 模型架构参数
-  hidden_dim: 128  # 减少隐藏层维度，降低内存消耗
-  num_layers: 2    # 减少LSTM层数，降低参数量
-  attention_heads: 4  # 减少多头注意力数量
-  use_attention: true  # 保持注意力机制
-  dropout: 0.15    # 保持dropout防止过拟合
-  # 🔥 OOM修复：减少数据增强
-  mixup_alpha: 0.0  # 从0.2改为0.0，关闭mixup减少内存
-  # SpecAugment：时间维遮挡占比与遮挡块数
-  spec_time_mask_ratio: 0.0  # 从0.1改为0.0
-  spec_time_masks: 0  # 从1改为0
-  # SpecAugment：特征维遮挡占比与遮挡块数
-  spec_feat_mask_ratio: 0.0  # 从0.1改为0.0
-  spec_feat_masks: 0  # 从1改为0
-  # 特征级高斯噪声标准差
-  aug_noise_std: 0.0  # 从0.01改为0.0
-  # 帧标注：窗口-标签的重叠比例阈值（例如 0.2 表示窗口与段重叠 ≥20% 才标为该类）
+  # 🧠 Memory optimization: reduced model parameters to avoid OOM
+  # Model architecture parameters
+  hidden_dim: 128  # Reduced hidden dimension to lower memory usage
+  num_layers: 2    # Reduced number of LSTM layers to lower parameter count
+  attention_heads: 4  # Reduced number of attention heads
+  use_attention: true  # Keep the attention mechanism enabled
+  dropout: 0.15    # Keep dropout to prevent overfitting
+  # 🔥 OOM fix: reduced data augmentation
+  mixup_alpha: 0.0  # Changed from 0.2 to 0.0, disabling mixup to save memory
+  # SpecAugment: time-dimension mask ratio and number of masks
+  spec_time_mask_ratio: 0.0  # Changed from 0.1 to 0.0
+  spec_time_masks: 0  # Changed from 1 to 0
+  # SpecAugment: feature-dimension mask ratio and number of masks
+  spec_feat_mask_ratio: 0.0  # Changed from 0.1 to 0.0
+  spec_feat_masks: 0  # Changed from 1 to 0
+  # Feature-level Gaussian noise standard deviation
+  aug_noise_std: 0.0  # Changed from 0.01 to 0.0
+  # Frame labeling: window-label overlap ratio threshold (e.g. 0.2 means a window must overlap a segment by >=20% to be labeled that class)
   label_overlap_ratio: 0.2
-  # 帧标注：忽略短于该时长（秒）的发作段
+  # Frame labeling: ignore seizure segments shorter than this duration (seconds)
   min_seg_duration: 0.0
 
 postprocess:
-  # 前景判定概率阈值（基于 1 - p(background)）
+  # Foreground decision probability threshold (based on 1 - p(background))
   prob: 0.8
-  # 前景概率平滑窗口长度（秒），0 为不平滑
+  # Foreground-probability smoothing window length (seconds); 0 means no smoothing
   smooth: 0.25
-  # 事件确认所需的连续窗口数（>=1）
+  # Number of consecutive windows required to confirm an event (>=1)
   confirm: 2
-  # 相邻同类片段的冷却合并时间（秒）
+  # Cooldown merge time for adjacent same-class segments (seconds)
   cooldown: 0.5
-  # 事件最小时长（秒），不足则忽略
+  # Minimum event duration (seconds); shorter events are discarded
   min_duration: 0.0
 
 labels:
-  # 背景类名（应与 train.bg_label 保持一致）
+  # Background class name (should match train.bg_label)
   background: bckg
-  # 发作类型表（规范名-别名），取第一个工作表每行前两列为 (label, alias)
-  excel_types: data/Seizure发作类型表.xlsx
-  # 时段类型表（可选，规则同上）
-  excel_periods: data/Seizure时段类型表.xlsx
-  # 由 Excel 解析后导出的标签集合与别名映射（训练与评估共用）
+  # Seizure-type table (canonical name - alias); the first two columns of each row in the first worksheet are read as (label, alias)
+  excel_types: data/Seizure_Types.xlsx
+  # Period-type table (optional, same rules as above)
+  excel_periods: data/Seizure_Periods.xlsx
+  # Label set and alias mapping exported after parsing the Excel files (shared by training and evaluation)
   json_out: outputs/labels.json
-

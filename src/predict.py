@@ -93,7 +93,7 @@ def main():
 	# Build model and run
 	input_dim = X.shape[-1]
 	num_classes = len(label_names)
-	# 🧠 使用注意力机制模型（与训练时保持一致）
+	# 🧠 Use the attention-based model (kept consistent with training)
 	model = BiLSTMClassifier(
 		input_dim=input_dim, 
 		hidden_dim=256, 
@@ -114,7 +114,7 @@ def main():
 		model.load_state_dict(state, strict=False)
 	model.eval()
 	with torch.no_grad():
-		# 🧠 注意力机制：模型返回logits和attention权重
+		# 🧠 Attention mechanism: the model returns logits and attention weights
 		logits, attention_info = model(torch.from_numpy(X[None, ...]).float())
 		probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
 

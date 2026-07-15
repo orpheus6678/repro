@@ -38,13 +38,13 @@ except Exception:
 
 def collate_batch(batch):
 	# batch: list of dict(x[T,F], centers[T], record_id, optional y[T])
-	# 🔥 OOM修复：添加最大序列长度限制
-	MAX_SEQUENCE_LENGTH = 8000  # 约33分钟的数据，防止内存爆炸
+	# 🔥 OOM fix: add a maximum sequence length limit
+	MAX_SEQUENCE_LENGTH = 8000  # About 33 minutes of data; prevents memory blowup
 	
 	lengths = []
 	for b in batch:
 		seq_len = b["x"].shape[0]
-		# 限制最大长度
+		# Cap the maximum length
 		limited_len = min(seq_len, MAX_SEQUENCE_LENGTH)
 		lengths.append(limited_len)
 	
@@ -52,9 +52,9 @@ def collate_batch(batch):
 	feat_dim = batch[0]["x"].shape[1]
 	B = len(batch)
 	
-	# 🔥 内存预检查
+	# 🔥 Memory pre-check
 	estimated_memory_mb = (B * max_t * feat_dim * 4) / (1024 * 1024)
-	if estimated_memory_mb > 800:  # 超过800MB警告
+	if estimated_memory_mb > 800:  # Warn if over 800MB
 		print(f"⚠️ Warning: Batch memory estimated at {estimated_memory_mb:.1f}MB")
 		print(f"   Reducing max_t from {max_t} to {min(max_t, 6000)}")
 		max_t = min(max_t, 6000)
@@ -72,7 +72,7 @@ def collate_batch(batch):
 	
 	for i, b in enumerate(batch):
 		actual_len = lengths[i]
-		# 智能截断：如果序列太长，截取前面部分
+		# Smart truncation: if the sequence is too long, keep the front portion
 		if b["x"].shape[0] > actual_len:
 			x_pad[i, :actual_len] = b["x"][:actual_len]
 			if "y" in b and b["y"] is not None and b["y"].size:
@@ -149,15 +149,15 @@ def evaluate(model: BiLSTMClassifier, dl: DataLoader, criterion: nn.Module, show
 			x = x.float().to(device, non_blocking=True)
 			y = y.to(device, non_blocking=True)
 			# lengths kept on CPU for packing utilities
-			# 🧠 注意力机制：模型返回logits和attention权重（evaluation时忽略attention_info）
+			# 🧠 Attention mechanism: the model returns logits and attention weights (attention_info is ignored during evaluation)
 			logits, _ = model(x, lengths=lengths)
 			B, T, C = logits.shape
 			loss = criterion(logits.reshape(B * T, C), y.reshape(B * T))
 			
-			# 🔧 调试：检查验证损失是否正常
+			# 🔧 Debug: check whether the validation loss is normal
 			loss_value = float(loss.item())
 			if np.isnan(loss_value) or np.isinf(loss_value):
-				print(f"⚠️ 验证异常损失值: {loss_value}, 跳过这个batch")
+				print(f"⚠️ Abnormal validation loss value: {loss_value}, skipping this batch")
 				continue
 				
 			loss_sum += loss_value
@@ -240,7 +240,7 @@ def main():
 	parser.add_argument("--scheduler", type=str, choices=["none", "cosine", "onecycle"], default="none")
 	parser.add_argument("--max_lr", type=float, default=1e-3)
 	parser.add_argument("--clip_grad", type=float, default=0.0)
-	# 🔥 OOM修复：添加梯度累积支持
+	# 🔥 OOM fix: add gradient accumulation support
 	parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
 	# augment
 	parser.add_argument("--mixup_alpha", type=float, default=0.0)
@@ -649,7 +649,7 @@ def main():
 	input_dim = int(len(EEG_BANDS) * 2 + 2 + 2)  # bands{mean,std} + broadband{mean,std} + RMS{mean,std}
 	num_classes = len(label_to_index)
 	
-	# 🚀 GPU优化：使用配置文件中的新模型参数
+	# 🚀 GPU optimization: use the new model parameters from the config file
 	hidden_dim = getattr(args, 'hidden_dim', 256)
 	num_layers = getattr(args, 'num_layers', 3) 
 	attention_heads = getattr(args, 'attention_heads', 8)
@@ -667,7 +667,7 @@ def main():
 	)
 	model = model.to(device)
 	
-	# 🔥 内存使用统计
+	# 🔥 Memory usage statistics
 	total_params = sum(p.numel() for p in model.parameters())
 	param_memory_mb = (total_params * 4) / (1024 * 1024)  # float32 = 4 bytes
 	logger.info(f"Model parameters: {total_params:,} ({param_memory_mb:.1f}MB)")
@@ -758,29 +758,29 @@ def main():
 		epoch_loss_sum = 0.0
 		epoch_loss_count = 0
 		
-		# 🔥 OOM修复：确保每个epoch开始时梯度清零
+		# 🔥 OOM fix: ensure gradients are zeroed at the start of each epoch
 		optim.zero_grad()
-		# 🔧 修复：简化进度条显示，避免冲突
+		# 🔧 Fix: simplified progress-bar display to avoid conflicts
 		_iter = dl_train
 		if args.progress == "bar":
 			_iter = tqdm(dl_train, desc=f"Train {epoch}/{args.epochs}", unit="batch", 
 			            disable=False, leave=True, position=0)
 		
-		# 🔧 移除混乱的cache进度条
+		# 🔧 Removed the messy cache progress bar
 		epoch_cache_pbar = None
 		seen_recs = set()
 		for it, batch in enumerate(_iter, start=1):
 			try:
 				x, y, lengths, rec_ids = batch
-				# 🔧 移除cache进度条更新逻辑
+				# 🔧 Removed cache-progress-bar update logic
 				seen_recs.update(rec_ids)
 				x = x.float().to(device, non_blocking=True)
 				y = y.to(device, non_blocking=True)
 				
-				# 🔥 OOM修复：内存检查
+				# 🔥 OOM fix: memory check
 				if torch.cuda.is_available():
 					memory_used_gb = torch.cuda.memory_allocated() / (1024**3)
-					if memory_used_gb > 6.0:  # 超过6GB清理
+					if memory_used_gb > 6.0:  # Clean up if over 6GB
 						torch.cuda.empty_cache()
 				
 				# augment: gaussian noise
@@ -791,7 +791,7 @@ def main():
 					x = _spec_augment(x, args.spec_time_mask_ratio, args.spec_time_masks, args.spec_feat_mask_ratio, args.spec_feat_masks)
 				# Mixup
 				xm, y_orig, soft_targets = _mixup(x, y, num_classes, args.mixup_alpha)
-				# 🧠 注意力机制：模型返回logits和attention权重
+				# 🧠 Attention mechanism: the model returns logits and attention weights
 				logits, attention_info = model(xm, lengths=lengths)
 				B, T, C = logits.shape
 				if soft_targets is not None:
@@ -800,23 +800,23 @@ def main():
 				else:
 					loss = criterion(logits.reshape(B * T, C), y.reshape(B * T))
 				
-				# 🔥 OOM修复：梯度累积
+				# 🔥 OOM fix: gradient accumulation
 				loss = loss / args.gradient_accumulation_steps
 				
-				# 🔧 调试：检查损失值是否正常
+				# 🔧 Debug: check whether the loss value is normal
 				loss_value = float(loss.item()) * args.gradient_accumulation_steps
 				if np.isnan(loss_value) or np.isinf(loss_value):
-					print(f"⚠️ 异常损失值: {loss_value}")
-					print(f"   batch信息: B={B}, T={T}, C={C}")
-					print(f"   logits范围: min={logits.min():.3f}, max={logits.max():.3f}")
-					print(f"   labels范围: min={y.min()}, max={y.max()}")
-					print(f"   有效标签数: {(y != -100).sum()}")
+					print(f"⚠️ Abnormal loss value: {loss_value}")
+					print(f"   batch info: B={B}, T={T}, C={C}")
+					print(f"   logits range: min={logits.min():.3f}, max={logits.max():.3f}")
+					print(f"   labels range: min={y.min()}, max={y.max()}")
+					print(f"   valid label count: {(y != -100).sum()}")
 					
-					# 检查logits是否有异常值
+					# Check whether logits contain abnormal values
 					if torch.isnan(logits).any():
-						print("   ❌ logits包含NaN")
+						print("   ❌ logits contain NaN")
 					if torch.isinf(logits).any():
-						print("   ❌ logits包含Inf")
+						print("   ❌ logits contain Inf")
 					
 					continue
 				
@@ -825,18 +825,18 @@ def main():
 				
 				loss.backward()
 				
-				# 梯度累积：只在累积步骤完成时更新参数
+				# Gradient accumulation: only update parameters once the accumulation step is complete
 				if it % args.gradient_accumulation_steps == 0:
 					if args.clip_grad and args.clip_grad > 0:
 						nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
 					optim.step()
 					optim.zero_grad()
 					
-					# 🔧 修复：学习率调度在optimizer.step()之后
+					# 🔧 Fix: step the LR scheduler after optimizer.step()
 					if args.scheduler == "onecycle" and scheduler is not None:
 						scheduler.step()
 				
-				# 🔧 修复：更好的进度条信息显示
+				# 🔧 Fix: better progress-bar info display
 				if args.progress == "bar" and hasattr(_iter, 'set_postfix'):
 					try:
 						current_loss = loss.item() * args.gradient_accumulation_steps
@@ -857,7 +857,7 @@ def main():
 					continue
 				else:
 					raise e
-		# 🔧 清理进度条
+		# 🔧 Clean up the progress bar
 		if args.progress == "bar" and hasattr(_iter, 'close'):
 			try:
 				_iter.close()

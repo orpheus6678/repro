@@ -102,7 +102,7 @@ class BiLSTMWithAttention(nn.Module):
         # Channel attention for input features
         self.channel_attention = ChannelAttention(input_dim, reduction=4)
         
-        # BiLSTM backbone - 更大的hidden_dim充分利用GPU
+        # BiLSTM backbone - a larger hidden_dim to make fuller use of the GPU
         self.lstm = nn.LSTM(
             input_size=input_dim,
             hidden_size=hidden_dim,
@@ -129,7 +129,7 @@ class BiLSTMWithAttention(nn.Module):
             nn.Linear(lstm_output_dim // 4, num_classes)
         )
         
-        # 权重初始化
+        # Weight initialization
         self._init_weights()
         
     def _init_weights(self):
@@ -214,6 +214,6 @@ class BiLSTMWithAttention(nn.Module):
         }
 
 
-# 向后兼容性别名
+# Backward-compatibility alias
 BiLSTMClassifier = BiLSTMWithAttention
 

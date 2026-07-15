@@ -1,41 +1,41 @@
 # 🧠 EEG-Epilepsy-Prediction
 
-**多尺度注意力BiLSTM的EEG癫痫发作检测与分型框架**
+**Multi-Scale Attention BiLSTM Framework for EEG Seizure Detection and Typing**
 
-集成**通道注意力**、**时间注意力**和**双向LSTM**的端到端深度学习框架。端到端流程：EDF 读取 → 频带/时域特征 → 🧠**多尺度注意力BiLSTM** 帧级多分类 → 事件级后处理（平滑/确认/冷却/最小时长）→ 指标评估与阈值网格搜索（FA/h 约束，自动写回配置）。
+An end-to-end deep learning framework integrating **channel attention**, **temporal attention**, and **bidirectional LSTM**. End-to-end pipeline: EDF reading → band/time-domain features → 🧠 **Multi-Scale Attention BiLSTM** frame-level multi-class classification → event-level postprocessing (smoothing/confirmation/cooldown/minimum duration) → metric evaluation and threshold grid search (FA/h constraint, auto write-back to config).
 
-**🎯 创新特性**: 注意力权重可视化 | 内存优化设计 | LOSOCV交叉验证 | 端到端训练推理
+**🎯 Key Features**: attention weight visualization | memory-optimized design | LOSOCV cross-validation | end-to-end training and inference
 
 ---
 
-## 一、整体架构与思路原理
+## 1. Overall Architecture and Design Rationale
 
-- 数据层（`src/edf_reader.py`）
-  - 使用 `pyedflib` 逐通道读取 EDF；去直流（零均值）；可选工频陷波（50/60Hz），可选带通/高通/低通；统一重采样到 `resample_hz`；将不同长度的通道裁剪到相同最小长度并堆叠为 `[C, N]`。
-- 特征层（`src/features.py`）
-  - 以滑窗参数 `window_sec/hop_sec` 计算 Welch PSD，聚合频带功率（delta/theta/alpha/beta/gamma），对通道做 {mean, std}；再加入宽频能量 {mean, std} 与时域 RMS {mean, std} → 得到逐帧特征 `[T, F]` 和帧中心时间 `centers`。
-- 模型层（`src/model.py`）- **🧠 多尺度注意力BiLSTM架构**
-  - **通道注意力**: 自适应选择重要的EEG频带特征，突出病理脑区活动
-  - **双向LSTM**: 提取时序上下文，捕捉癫痫发作的前后时序依赖
-  - **时间注意力**: 多头自注意力机制，专注于癫痫发作关键时刻
-  - **分类器**: 多层全连接网络，输出帧级 logits `[B,T,C]`；损失为交叉熵（忽略标签值 -100）
-  - 训练支持学习率调度（Cosine/OneCycleLR）、增强（Mixup/SpecAugment/噪声）、梯度裁剪，提升泛化与稳定性
-- 后处理（`src/postprocess.py`）
-  - 基于 `1 - p(bckg)`：平滑（移动平均）→ 阈值二值化 → 连续确认窗（confirm）→ 相邻片段冷却时间合并（cooldown）→ 最小事件时长过滤；片段内按概率和（或最大）选主类与置信。
-- 评估与阈值（`src/metrics.py`、`src/scan_thresholds.py`、`src/eval.py`）
-  - 事件级 IoU 匹配：计算 P/R/F1、FA/h、起止延迟；阈值网格搜索在 FA/h 约束下选最佳，并自动写回 `configs/config.yaml`。
+- Data layer (`src/edf_reader.py`)
+  - Reads EDF channel by channel using `pyedflib`; removes DC offset (zero-mean); optional mains notch filter (50/60Hz), optional bandpass/highpass/lowpass; uniformly resamples to `resample_hz`; trims channels of different lengths to the same minimum length and stacks them into `[C, N]`.
+- Feature layer (`src/features.py`)
+  - Computes Welch PSD using sliding-window parameters `window_sec/hop_sec`, aggregates band power (delta/theta/alpha/beta/gamma), computes {mean, std} across channels; also adds broadband energy {mean, std} and time-domain RMS {mean, std} → yields per-frame features `[T, F]` and frame center times `centers`.
+- Model layer (`src/model.py`) - **🧠 Multi-Scale Attention BiLSTM Architecture**
+  - **Channel Attention**: adaptively selects important EEG band features, highlighting activity in pathological brain regions
+  - **Bidirectional LSTM**: extracts temporal context, capturing dependencies before and after a seizure
+  - **Temporal Attention**: multi-head self-attention mechanism, focusing on key moments of seizure onset
+  - **Classifier**: multi-layer fully connected network, outputs frame-level logits `[B,T,C]`; loss is cross-entropy (ignoring label value -100)
+  - Training supports learning-rate scheduling (Cosine/OneCycleLR), augmentation (Mixup/SpecAugment/noise), and gradient clipping to improve generalization and stability
+- Postprocessing (`src/postprocess.py`)
+  - Based on `1 - p(bckg)`: smoothing (moving average) → threshold binarization → consecutive-frame confirmation window (confirm) → cooldown merging of adjacent segments (cooldown) → minimum event duration filtering; within a segment, the dominant class and confidence are chosen by summed (or max) probability.
+- Evaluation and thresholds (`src/metrics.py`, `src/scan_thresholds.py`, `src/eval.py`)
+  - Event-level IoU matching: computes P/R/F1, FA/h, onset/offset latency; threshold grid search picks the best threshold under an FA/h constraint and automatically writes it back to `configs/config.yaml`.
 
-流程：
+Pipeline:
 
 ```
 EDF files
   └─> edf_reader (filter / notch / resample / align)
         └─> features (Welch PSD bands + RMS)
               └─> 🧠 Multi-Scale Attention BiLSTM
-                    ├─> Channel Attention (频带选择)
-                    ├─> BiLSTM (时序建模)
-                    ├─> Temporal Attention (关键时刻聚焦)
-                    └─> Classifier (帧级分类)
+                    ├─> Channel Attention (band selection)
+                    ├─> BiLSTM (temporal modeling)
+                    ├─> Temporal Attention (focus on key moments)
+                    └─> Classifier (frame-level classification)
                           ├─> postprocess (smooth / confirm / cooldown / min_dur) -> events
                           ├─> metrics (PR/F1, FA/h, latencies)
                           └─> threshold grid search (constraints + writeback)
@@ -43,55 +43,55 @@ EDF files
 
 ---
 
-## 二、安装与环境
+## 2. Installation and Environment
 
-- Python 3.11+（建议虚拟环境 conda/venv）
+- Python 3.11+ (a virtual environment such as conda/venv is recommended)
 
-### 🔧 **推荐安装方式**
+### 🔧 **Recommended Installation**
 
 ```bash
-# 1. 创建虚拟环境（推荐）
+# 1. Create a virtual environment (recommended)
 conda create -n EEG_work python=3.11
 conda activate EEG_work
 
-# 2. 安装依赖
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. 验证安装
+# 3. Verify installation
 python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}')"
 ```
 
-### 🪟 **Windows用户特别说明**
+### 🪟 **Notes for Windows Users**
 
-- **环境激活**: 每次使用前需要激活环境：`conda activate EEG_work`
-- **命令行语法**: Windows PowerShell不支持`\`续行，请使用单行命令或``(反引号)续行
-- **中文支持**: 确保文件保存为 UTF-8，使用PowerShell避免乱码
+- **Activating the environment**: activate the environment before each use: `conda activate EEG_work`
+- **Command-line syntax**: Windows PowerShell doesn't support `\` for line continuation; use a single-line command, or the backtick (`` ` ``) for continuation
+- **Character encoding**: make sure files are saved as UTF-8, and use PowerShell to avoid garbled text
 
-### 🚨 **OOM内存溢出修复**
+### 🚨 **OOM (Out-of-Memory) Fix**
 
-**本项目已内置OOM保护机制，包括：**
-- ✅ 智能序列长度限制（最大8000帧，约33分钟）
-- ✅ 动态内存检查和自动截断
-- ✅ 梯度累积支持（模拟大批次效果）
-- ✅ 内存优化的批处理函数
-- ✅ GPU内存监控和自动清理
+**This project has built-in OOM protection, including:**
+- ✅ Smart sequence-length limiting (max 8000 frames, about 33 minutes)
+- ✅ Dynamic memory checks with automatic truncation
+- ✅ Gradient accumulation support (simulates a larger batch size)
+- ✅ Memory-optimized batching functions
+- ✅ GPU memory monitoring and automatic cleanup
 
-**如果仍遇到OOM，可进一步调整：**
+**If you still run into OOM, you can adjust further:**
 ```bash
-# 最保守配置（适用于8GB内存）
+# Most conservative configuration (for 8GB memory)
 python -m src.train --batch_size 1 --gradient_accumulation_steps 4 --num_workers 0
 ```
 
 ---
 
-## 三、数据组织与缓存
+## 3. Data Organization and Caching
 
-- 数据集参考：TUSZ（Temple University Hospital Seizure Corpus，见官网文档）。
-  - 官方主页：`https://www.isip.piconepress.com/projects/tuh_eeg/html/downloads.shtml`
+- Reference dataset: TUSZ (Temple University Hospital Seizure Corpus, see the official documentation).
+  - Official homepage: `https://www.isip.piconepress.com/projects/tuh_eeg/html/downloads.shtml`
 
-- 将 EDF 与同名 TSE 放入 `data/Dataset_train_dev/`，TSE 行示例：
-  - `0.0000 36.8868 bckg 1.0000`（开始秒 结束秒 标签 置信；置信可缺省）
-- 目录示例：
+- Place EDF files and their matching TSE files into `data/Dataset_train_dev/`. Example TSE line:
+  - `0.0000 36.8868 bckg 1.0000` (start seconds, end seconds, label, confidence; confidence may be omitted)
+- Example directory layout:
 
 ```
 data/
@@ -101,108 +101,108 @@ data/
     ...
 ```
 
-- 首次运行会在 `data_cache/` 生成 `.npz` 特征缓存，加速后续流程。
-- `.gitignore` 已忽略：`data/`, `data_cache/`, `outputs/`, `__pycache__/`。
+- On first run, `.npz` feature caches will be generated in `data_cache/` to speed up subsequent runs.
+- Already ignored via `.gitignore`: `data/`, `data_cache/`, `outputs/`, `__pycache__/`.
 
 ---
 
-## 四、内存优化配置 🚀
+## 4. Memory-Optimized Configuration 🚀
 
-本项目已针对GPU内存进行深度优化，支持在较小显存环境下运行：
+This project has been deeply optimized for GPU memory usage, supporting operation in smaller-VRAM environments:
 
-### 📊 **模型参数优化**
-- **原始配置**: ~4.93M 参数，训练内存 ~56MB
-- **优化配置**: ~0.85M 参数，训练内存 ~10MB (减少82.8%)
+### 📊 **Model Parameter Optimization**
+- **Original configuration**: ~4.93M parameters, ~56MB training memory
+- **Optimized configuration**: ~0.85M parameters, ~10MB training memory (82.8% reduction)
 
-### 🔧 **关键优化措施**
+### 🔧 **Key Optimization Measures**
 ```yaml
-# 🧠 注意力机制模型架构优化
-hidden_dim: 128      # LSTM隐藏层维度（从256减少到128）
-num_layers: 2        # LSTM层数（从3减少到2）
-attention_heads: 4   # 多头注意力数量（从8减少到4）
-use_attention: true  # 启用多尺度注意力机制
+# 🧠 Attention-mechanism model architecture optimization
+hidden_dim: 128      # LSTM hidden dimension (reduced from 256 to 128)
+num_layers: 2        # Number of LSTM layers (reduced from 3 to 2)
+attention_heads: 4   # Number of attention heads (reduced from 8 to 4)
+use_attention: true  # Enable multi-scale attention mechanism
 
-# 训练优化
-batch_size: 1                    # 极小批处理
-gradient_accumulation_steps: 8   # 梯度累积保持等效批大小
-num_workers: 0                   # 减少多进程开销
-precompute_cache: none          # 关闭预计算缓存
+# Training optimizations
+batch_size: 1                    # Very small batch size
+gradient_accumulation_steps: 8   # Gradient accumulation to keep an equivalent effective batch size
+num_workers: 0                   # Reduce multiprocessing overhead
+precompute_cache: none          # Disable precomputed cache
 ```
 
-### 💾 **显存使用对比**
-| 配置 | RTX 4060 (8GB) | RTX 3090 (24GB) |
+### 💾 **VRAM Usage Comparison**
+| Configuration | RTX 4060 (8GB) | RTX 3090 (24GB) |
 |------|----------------|------------------|
-| 原始 | OOM ❌ | 正常 ✅ |
-| 优化 | 正常 ✅ | 快速 🚀 |
+| Original | OOM ❌ | Normal ✅ |
+| Optimized | Normal ✅ | Fast 🚀 |
 
-### 🎯 **适用场景**
-- ✅ RTX 4060/4070 等8GB显卡
-- ✅ 学习研究环境
-- ✅ 资源受限场景
-- 🚀 RTX 3090/4090 高端显卡可获得更快训练速度
-
----
-
-## 五、🧠 注意力机制架构详解
-
-本项目实现了专为EEG癫痫检测设计的**多尺度注意力BiLSTM架构**，通过三层注意力机制提升检测精度：
-
-### 📡 **1. 通道注意力 (Channel Attention)**
-```python
-# 自适应选择重要的EEG频带特征
-- 输入: [B, T, F] EEG特征
-- 功能: 突出病理脑区的频谱活动
-- 实现: 全局池化 + FC层 + Sigmoid激活
-- 输出: 特征加权后的表示
-```
-
-### ⏰ **2. 时间注意力 (Temporal Attention)**  
-```python
-# 多头自注意力机制，聚焦癫痫发作关键时刻
-- 输入: [B, T, H] LSTM隐藏状态
-- 功能: 捕捉长距离时序依赖，专注发作起始
-- 实现: Multi-Head Self-Attention + 残差连接
-- 头数: 4个注意力头（内存优化）
-```
-
-### 🧬 **3. BiLSTM骨干网络**
-```python
-# 双向LSTM提取时序上下文
-- 层数: 2层（平衡性能与效率）
-- 隐藏层: 128维（内存优化）
-- 双向: 同时建模过去和未来信息
-- Dropout: 0.15防止过拟合
-```
-
-### 🎯 **架构优势**
-- **🔍 精准定位**: 通道注意力突出异常频带
-- **⏱️ 时序建模**: 时间注意力捕捉发作时序模式  
-- **💡 端到端**: 注意力权重可视化，提供可解释性
-- **⚡ 高效**: 内存优化设计，适配8GB显卡
-
-### 📊 **注意力可视化**
-训练过程中模型会输出注意力权重，可用于：
-- 分析哪些频带对检测最重要
-- 可视化癫痫发作的时序模式
-- 提供临床可解释的诊断依据
+### 🎯 **Applicable Scenarios**
+- ✅ 8GB cards such as the RTX 4060/4070
+- ✅ Learning/research environments
+- ✅ Resource-constrained scenarios
+- 🚀 High-end cards such as the RTX 3090/4090 will train faster
 
 ---
 
-## 六、快速上手（逐步操作）
+## 5. 🧠 Attention Mechanism Architecture in Detail
 
-1) 准备数据
+This project implements a **Multi-Scale Attention BiLSTM architecture** designed specifically for EEG seizure detection, improving detection accuracy through three layers of attention:
 
-- 按上节放好 EDF/TSE；确保 `pyedflib` 可正常读取 EDF。
+### 📡 **1. Channel Attention**
+```python
+# Adaptively selects important EEG band features
+- Input: [B, T, F] EEG features
+- Purpose: highlight spectral activity in pathological brain regions
+- Implementation: global pooling + FC layer + Sigmoid activation
+- Output: feature-weighted representation
+```
 
-2) 配置
+### ⏰ **2. Temporal Attention**  
+```python
+# Multi-head self-attention mechanism, focusing on key seizure moments
+- Input: [B, T, H] LSTM hidden states
+- Purpose: capture long-range temporal dependencies, focus on seizure onset
+- Implementation: Multi-Head Self-Attention + residual connection
+- Number of heads: 4 attention heads (memory-optimized)
+```
 
-- 编辑 `configs/config.yaml` 的 `train`、`postprocess`、`labels` 三节；或使用命令行参数覆盖。
-  - 如需多类别检测/分型，请提供两张 Excel（示例字段：规范名/别名），训练会自动生成并使用 `outputs/labels.json`；
-  - 训练前会进行“类别一致性”前置校验，`.tse` 中的标签必须被 Excel 定义的标签/别名覆盖。
+### 🧬 **3. BiLSTM Backbone**
+```python
+# Bidirectional LSTM extracts temporal context
+- Layers: 2 (balances performance and efficiency)
+- Hidden dimension: 128 (memory-optimized)
+- Bidirectional: models both past and future information simultaneously
+- Dropout: 0.15 to prevent overfitting
+```
 
-3) 划分与训练
+### 🎯 **Architectural Advantages**
+- **🔍 Precise localization**: channel attention highlights abnormal bands
+- **⏱️ Temporal modeling**: temporal attention captures seizure timing patterns  
+- **💡 End-to-end**: attention weight visualization provides interpretability
+- **⚡ Efficient**: memory-optimized design, fits 8GB cards
 
-3.1 固定划分（可选，推荐）
+### 📊 **Attention Visualization**
+During training the model outputs attention weights, which can be used to:
+- Analyze which bands are most important for detection
+- Visualize the temporal pattern of a seizure
+- Provide clinically interpretable diagnostic evidence
+
+---
+
+## 6. Quick Start (Step by Step)
+
+1) Prepare the data
+
+- Place EDF/TSE files as described above; make sure `pyedflib` can read the EDF files correctly.
+
+2) Configuration
+
+- Edit the `train`, `postprocess`, and `labels` sections of `configs/config.yaml`; or override via command-line arguments.
+  - For multi-class detection/typing, provide two Excel files (example fields: canonical name / alias); training will automatically generate and use `outputs/labels.json`;
+  - Before training, a "class consistency" pre-check is run — the labels in `.tse` must be covered by the labels/aliases defined in the Excel files.
+
+3) Splitting and training
+
+3.1 Fixed split (optional, recommended)
 
 ```bash
 python -m src.split \
@@ -210,45 +210,45 @@ python -m src.split \
   --out outputs/splits.json --val_ratio 0.2 --test_ratio 0.2 --seed 42
 ```
 
-3.2 训练（推荐配置，已优化OOM问题）
+3.2 Training (recommended config, OOM issues already optimized)
 
-### 🚀 **快速开始训练**
+### 🚀 **Quick Start Training**
 
 ```bash
-# 激活环境（Windows用户必须）
+# Activate the environment (required for Windows users)
 conda activate EEG_work
 
-# 标准训练（已深度优化内存使用）
+# Standard training (memory usage deeply optimized)
 python -m src.train --config configs/config.yaml
 ```
 
-### 🔧 **自定义参数训练**
+### 🔧 **Training with Custom Parameters**
 
 ```bash
-# Windows PowerShell 单行版本（内存优化配置）
+# Windows PowerShell single-line version (memory-optimized config)
 python -m src.train --config configs/config.yaml --scheduler onecycle --epochs 10 --batch_size 1 --progress bar
 
-# Linux/Mac 多行版本
+# Linux/Mac multi-line version
 python -m src.train --config configs/config.yaml \
   --scheduler onecycle --epochs 10 \
   --batch_size 1 --progress bar
 ```
 
-### 📊 **监控训练过程**
+### 📊 **Monitoring Training**
 
 - **TensorBoard**: `tensorboard --logdir outputs/tb`
-- **训练日志**: `outputs/train.log`
-- **最佳模型**: `outputs/best.pt`
+- **Training log**: `outputs/train.log`
+- **Best model**: `outputs/best.pt`
 
-3.3 LOSOCV（按受试者留一交叉验证，支持断点续训）
+3.3 LOSOCV (Leave-One-Subject-Out Cross-Validation, supports resuming from checkpoints)
 
-### 🔄 **LOSOCV训练命令（内存优化版）**
+### 🔄 **LOSOCV Training Command (Memory-Optimized)**
 
 ```bash
-# Windows PowerShell 版本（推荐，已优化内存）
+# Windows PowerShell version (recommended, memory-optimized)
 python -m src.losocv --config configs/config.yaml --run_train --auto_optimize --opt_trials 5 --opt_epochs 2 --epochs 10 --batch_size 1 --resume --progress bar
 
-# Linux/Mac 版本
+# Linux/Mac version
 python -m src.losocv --run_train --auto_optimize \
   --config configs/config.yaml \
   --opt_trials 5 --opt_epochs 2 \
@@ -256,38 +256,38 @@ python -m src.losocv --run_train --auto_optimize \
   --resume --progress bar
 ```
 
-### ⚡ **快速测试LOSOCV**
+### ⚡ **Quick LOSOCV Test**
 
 ```bash
-# 快速测试（几分钟完成，内存友好）
+# Quick test (finishes in a few minutes, memory-friendly)
 python -m src.losocv --config configs/config.yaml --run_train --epochs 2 --batch_size 1 --progress bar
 ```
 
-### 🔄 **断点续训特性**
+### 🔄 **Resume-From-Checkpoint Features**
 
-- ✅ **自动检测**: 使用`--resume`参数自动从中断点继续
-- ✅ **fold级别续训**: 每个患者fold单独保存，支持部分完成后续训
-- ✅ **双层续训**: 支持Optuna试验级别和最终训练的断点续训
-- ✅ **进度查看**: 
+- ✅ **Automatic detection**: use the `--resume` flag to automatically continue from where training was interrupted
+- ✅ **Fold-level resuming**: each patient fold is saved individually, so training can resume after partial completion
+- ✅ **Two-level resuming**: supports resuming both at the Optuna-trial level and the final-training level
+- ✅ **Checking progress**: 
   ```bash
-  # 查看完成的fold数量
+  # Check how many folds have completed
   ls outputs/losocv/fold_*/best.pt
-  # 查看总fold数
+  # Check the total number of folds
   ls outputs/losocv/*.json
   ```
 
-- 每折会：
-  - 生成该折的 `train/val/test` 划分 JSON（test 为被留出的受试者；其余按“患者级多类别分层”切分 train/val）
-  - Optuna 寻优帧标注参数（`label_overlap_ratio`、`min_seg_duration`），短训评估挑最优
-  - 用最优参数训练该折最终模型（写入 `outputs/losocv/fold_<PID>/best.pt`）
-  - 评估该折 test，写入 `eval_summary.json` / `eval_records.csv`
-  - 训练与评估日志输出更精简易读（控制台与 `train.log`）
+- For each fold:
+  - Generates that fold's `train/val/test` split JSON (test is the held-out subject; the rest is split into train/val using "patient-level multi-class stratification")
+  - Optuna searches for optimal frame-labeling parameters (`label_overlap_ratio`, `min_seg_duration`), picking the best via short-training evaluation
+  - Trains the final model for this fold using the optimal parameters (written to `outputs/losocv/fold_<PID>/best.pt`)
+  - Evaluates this fold's test set, writing `eval_summary.json` / `eval_records.csv`
+  - Training and evaluation logs are more concise and readable (both console and `train.log`)
 
-- 全部折完成后自动汇总：
+- Once all folds complete, results are automatically aggregated:
   - `outputs/losocv/loso_eval_aggregate.json`
-  - 给出“宏平均（简单平均）”与“微平均（按 TP/FP/FN 与时长聚合）”两套指标（优先查看 IoU=0.5）
+  - Provides both "macro average (simple average)" and "micro average (aggregated over TP/FP/FN and duration)" metrics (check IoU=0.5 first)
 
-4) 阈值网格（FA/h 约束 + 写回配置）
+4) Threshold grid search (FA/h constraint + config write-back)
 
 ```
 python -m src.scan_thresholds \
@@ -299,22 +299,22 @@ python -m src.scan_thresholds \
   --out outputs/threshold_grid.json --write_config configs/config.yaml
 ```
 
-- 输出：`outputs/threshold_grid.json`；将最佳阈值写回 `configs/config.yaml:postprocess`。
- - 说明：脚本当前未加载 checkpoint，使用随机初始化模型进行演示性扫描，主要展示“阈值-指标-写回”的流程。实际使用中建议基于已训练模型进行阈值选择（可自行扩展脚本以加载权重），并始终提供 `--labels_json` 以保证类别集合一致。
+- Output: `outputs/threshold_grid.json`; the best threshold is written back to `configs/config.yaml:postprocess`.
+ - Note: the script currently doesn't load a checkpoint — it uses a randomly initialized model for a demonstration scan, mainly to illustrate the "threshold → metric → writeback" flow. For real use, it's recommended to do threshold selection based on a trained model (you can extend the script yourself to load weights), and always provide `--labels_json` to ensure a consistent label set.
 
-5) 评估（从 checkpoint）
+5) Evaluation (from a checkpoint)
 
 ```
 python -m src.eval --config configs/config.yaml --checkpoint outputs/best.pt \
   --labels_json outputs/labels.json
 ```
 
-- 输出：
-  - `outputs/eval_summary.json`（多 IoU 全局指标）
-  - `outputs/eval_records.csv`（逐记录 TP/FP/FN 与起止延迟）
- - 提示：`labels.json` 的类别顺序需与训练时一致，且需与 checkpoint 分类头的类别数相匹配，否则脚本会报错。
+- Output:
+  - `outputs/eval_summary.json` (global metrics across multiple IoU thresholds)
+  - `outputs/eval_records.csv` (per-record TP/FP/FN and onset/offset latency)
+ - Tip: the class order in `labels.json` must match the order used during training, and must match the number of classes in the checkpoint's classification head, or the script will raise an error.
 
-- 针对某一折进行评估（仅该折 test）：
+- To evaluate a single fold (that fold's test set only):
 ```bash
 python -m src.eval --config configs/config.yaml \
   --checkpoint outputs/losocv/fold_<PID>/best.pt \
@@ -323,7 +323,7 @@ python -m src.eval --config configs/config.yaml \
   --out_csv outputs/losocv/fold_<PID>/eval_records.csv
 ```
 
-6) 单文件检测（推理）
+6) Single-file detection (inference)
 
 ```
 python -m src.predict --edf path/to/file.edf --checkpoint outputs/best.pt \
@@ -331,340 +331,340 @@ python -m src.predict --edf path/to/file.edf --checkpoint outputs/best.pt \
   --out outputs/pred_events.json
 ```
 
-- 输出：是否存在癫痫事件、段数、每段类型与起止时间。
- - 提示：checkpoint 的分类头类别数必须与提供的 `labels.json` 一致，否则会提示不匹配错误。
+- Output: whether a seizure event is present, the number of segments, and the type and start/end time of each segment.
+ - Tip: the number of classes in the checkpoint's classification head must match the provided `labels.json`, or a mismatch error will be raised.
 
-7) 复现与缓存
+7) Reproducibility and caching
 
-- 随机种子：`--seed`（训练脚本）
-- 重算特征：删除 `data_cache/*.npz` 后再次运行。
+- Random seed: `--seed` (training script)
+- Recompute features: delete `data_cache/*.npz` and run again.
 
 ---
 
-## 五、配置详解（摘录）
+## 5. Configuration Details (Excerpt)
 
 `configs/config.yaml`
 
 ```
 train:
-  # 含有 EDF/TSE 成对文件的数据根目录
+  # Root data directory containing paired EDF/TSE files
   data_dir: data/Dataset_train_dev
-  # 特征缓存目录（存放 .npz，加速复用）
+  # Feature cache directory (stores .npz files, speeds up reuse)
   cache_dir: data_cache
-  # 特征滑窗长度（秒）
+  # Feature sliding-window length (seconds)
   window_sec: 2.0
-  # 特征滑窗步长（秒）
+  # Feature sliding-window hop length (seconds)
   hop_sec: 0.25
-  # 读取后统一重采样的频率（Hz）
+  # Resampling frequency applied uniformly after reading (Hz)
   resample_hz: 256.0
-  # 预处理带通范围（Hz）；某端置为 null 可退化为高通/低通或不启用
+  # Preprocessing bandpass range (Hz); set either end to null to fall back to highpass/lowpass, or disable entirely
   bandpass: [0.5, 45.0]
-  # 工频陷波（50 或 60）；置为 null 不启用
+  # Mains notch filter (50 or 60); set to null to disable
   notch_hz: 50.0
-  # 背景类名称（需与 .tse 或别名映射一致）
+  # Background class name (must match `.tse` or the alias mapping)
   bg_label: bckg
   
-  # 🔧 深度内存优化配置
-  batch_size: 1                    # 极小批处理避免OOM
-  gradient_accumulation_steps: 8   # 梯度累积保持等效批大小
+  # 🔧 Deep memory-optimization configuration
+  batch_size: 1                    # Very small batch size to avoid OOM
+  gradient_accumulation_steps: 8   # Gradient accumulation to keep an equivalent effective batch size
   
-  # 训练轮次
+  # Number of training epochs
   epochs: 20
-  # 按病人划分的验证/测试比例
+  # Validation/test ratio, split by patient
   val_ratio: 0.2
   test_ratio: 0.0
-  # 随机种子（复现）
+  # Random seed (for reproducibility)
   seed: 42
-  # 输出目录（日志/权重/TensorBoard）
+  # Output directory (logs/weights/TensorBoard)
   out_dir: outputs
   
-  # 🔧 深度内存优化：减少并发和预计算
-  num_workers: 0                   # 减少多进程内存开销
-  precompute_cache: none          # 关闭预计算减少内存占用
-  # 固定划分文件（可选）：如设置，将按此划分使用 train/val/test 的 record_id 列表
+  # 🔧 Deep memory optimization: reduce concurrency and precomputation
+  num_workers: 0                   # Reduce multiprocessing memory overhead
+  precompute_cache: none          # Disable precomputation to reduce memory usage
+  # Fixed split file (optional): if set, uses the train/val/test record_id lists from this split
   splits_json: outputs/splits.json
-  # 分层策略（none|has_seizure|multiclass）：按患者分组的分层划分，默认多分类按类覆盖分层
+  # Stratification strategy (none|has_seizure|multiclass): patient-grouped stratified split; defaults to multi-class per-class-coverage stratification
   stratify: multiclass
-  # 终端训练进度显示（none|bar）与日志间隔（iter 级日志默认关闭，epoch 汇总总会打印）
+  # Terminal training-progress display (none|bar) and log interval (per-iteration logging is off by default; epoch summaries are always printed)
   progress: none
   log_interval: 0
-  # 是否在训练前先做一次基线验证（默认关闭）
+  # Whether to run one baseline validation pass before training starts (off by default)
   eval_at_start: false
  
 
-  # 学习率调度与数据增强
-  # 建议：小中型数据集可选 onecycle；也可用 none/cosine
-  scheduler: onecycle  # 可选：none|cosine|onecycle
+  # Learning-rate scheduling and data augmentation
+  # Recommendation: onecycle for small/medium datasets; none/cosine also available
+  scheduler: onecycle  # options: none|cosine|onecycle
   max_lr: 0.001
-  # 当未提供 Excel/labels.json 时，可从 TSE 自动推导标签集合
+  # If no Excel/labels.json is provided, the label set can be auto-derived from the TSE files
   auto_labels_from_tse: true
-  # 梯度裁剪阈值（0 表示不裁剪）
+  # Gradient clipping threshold (0 means no clipping)
   clip_grad: 0.0
-  # Mixup 强度（>0 开启帧级软标签混合）
+  # Mixup strength (>0 enables frame-level soft-label mixing)
   mixup_alpha: 0.0
-  # SpecAugment 遮挡（0 表示不启用）
+  # SpecAugment masking (0 means disabled)
   spec_time_mask_ratio: 0.0
   spec_time_masks: 0
   spec_feat_mask_ratio: 0.0
   spec_feat_masks: 0
-  # 特征级高斯噪声强度
+  # Feature-level Gaussian noise strength
   aug_noise_std: 0.0
-  # 帧标注：窗口-标签重叠比例阈值（0~1）与最小段时长（秒）
+  # Frame labeling: window-label overlap ratio threshold (0~1) and minimum segment duration (seconds)
   label_overlap_ratio: 0.2
   min_seg_duration: 0.0
 
 postprocess:
-  # 基于 1 - p(background) 的判定阈值
+  # Decision threshold based on 1 - p(background)
   prob: 0.8
-  # 概率平滑窗口（秒）
+  # Probability smoothing window (seconds)
   smooth: 0.25
-  # 事件确认所需的连续帧数
+  # Number of consecutive frames required to confirm an event
   confirm: 2
-  # 冷却合并时间（秒，同类相邻事件在此间隔内合并）
+  # Cooldown merge time (seconds; same-class adjacent events within this interval are merged)
   cooldown: 0.5
-  # 最短事件时长（秒，低于此阈值丢弃）
+  # Minimum event duration (seconds; events shorter than this are discarded)
   min_duration: 0.0
 
 labels:
-  # 背景类名称（需与 train.bg_label 保持一致）
+  # Background class name (must match train.bg_label)
   background: bckg
-  # Excel 表（取第一个 sheet）：每行前两个非空单元格视为 (label, alias)
+  # Excel sheet (first sheet is used): the first two non-empty cells of each row are treated as (label, alias)
   excel_types: <path_to_types.xlsx>
   excel_periods: <path_to_periods.xlsx>
-  # 训练/评估/推理共用的标签与别名导出文件
+  # Shared label/alias export file used across training/evaluation/inference
   json_out: <path_to_labels.json>
 ```
 
-要点说明：
+Key points:
 
-- `window_sec/hop_sec` 控制时间分辨率与计算量；`resample_hz` 建议与数据接近的频率（如 256Hz）。
-- `bandpass/notch_hz` 用于抑制基线漂移与工频噪声；根据实验环境（50/60Hz）调整。
-- 调度器：`onecycle` 在中小数据集上通常更稳定；`cosine` 简洁有效。
-- 增强：`mixup_alpha>0` 开启帧级软标签混合；SpecAugment 用于时间/特征维遮挡；`aug_noise_std` 轻度高斯噪声。
-- 预热缓存：`precompute_cache` 控制预先构建 `data_cache/*.npz` 的范围；当 `num_workers>0` 时预热与训练/验证加载均会并行执行。
-- 后处理：`prob` 越高越保守（减少 FP）；`confirm/cooldown/min_duration` 控制事件碎片化与误报。
- - 标签：若未提供 Excel/`labels.json` 且开启 `train.auto_labels_from_tse=true`，训练会先扫描 `.tse` 中出现的（非背景）标签并自动构建标签集合；模板中的 Excel 路径仅为示例，如无实际文件请替换为你自己的路径或移除该字段以避免报错。
+- `window_sec/hop_sec` control the time resolution and computation cost; `resample_hz` should be close to the data's native sampling rate (e.g. 256Hz).
+- `bandpass/notch_hz` suppress baseline drift and mains noise; adjust to the experimental environment (50/60Hz).
+- Scheduler: `onecycle` is generally more stable on small/medium datasets; `cosine` is simple and effective.
+- Augmentation: `mixup_alpha>0` enables frame-level soft-label mixing; SpecAugment masks time/feature dimensions; `aug_noise_std` adds light Gaussian noise.
+- Warm-up caching: `precompute_cache` controls the scope of pre-building `data_cache/*.npz`; when `num_workers>0`, warm-up and train/val loading run in parallel.
+- Postprocessing: a higher `prob` is more conservative (fewer false positives); `confirm/cooldown/min_duration` control event fragmentation and false alarms.
+ - Labels: if no Excel/`labels.json` is provided and `train.auto_labels_from_tse=true` is set, training will first scan the (non-background) labels appearing in `.tse` files and automatically build the label set; the Excel paths in the template are just examples — if you don't have actual files, replace them with your own paths or remove the field to avoid errors.
 
 ---
 
-## 六、🧠 特征与注意力模型（详细架构）
+## 6. 🧠 Features and Attention Model (Detailed Architecture)
 
-### 📊 **EEG特征提取**
-- **频带分析**：delta(0.5–4)、theta(4–8)、alpha(8–13)、beta(13–30)、gamma(30–45)
-- **每帧特征**（14维）：  
-  - 5个频带功率 {mean, std} → 10维  
-  - 宽频能量 {mean, std} → 2维  
-  - 时域RMS {mean, std} → 2维  
+### 📊 **EEG Feature Extraction**
+- **Band analysis**: delta(0.5–4), theta(4–8), alpha(8–13), beta(13–30), gamma(30–45)
+- **Per-frame features** (14 dimensions):  
+  - 5 band powers {mean, std} → 10 dims  
+  - Broadband energy {mean, std} → 2 dims  
+  - Time-domain RMS {mean, std} → 2 dims  
 
-### 🧠 **多尺度注意力BiLSTM架构**
+### 🧠 **Multi-Scale Attention BiLSTM Architecture**
 ```python
-# 完整前向传播流程
-1. 通道注意力: [B,T,14] → 突出重要频带
-2. BiLSTM骨干: [B,T,14] → [B,T,256] (hidden_dim*2)
-3. 时间注意力: [B,T,256] → 聚焦关键时刻 + 残差连接
-4. 分类器: [B,T,256] → [B,T,C] 帧级logits
+# Complete forward-pass pipeline
+1. Channel attention: [B,T,14] → highlights important bands
+2. BiLSTM backbone: [B,T,14] → [B,T,256] (hidden_dim*2)
+3. Temporal attention: [B,T,256] → focuses on key moments + residual connection
+4. Classifier: [B,T,256] → [B,T,C] frame-level logits
 ```
 
-### 📈 **模型参数统计**
-- **总参数量**: ~0.85M（内存优化版）
-- **通道注意力**: 84参数 (0.01%)
-- **BiLSTM**: 0.64M参数 (75.5%)
-- **时间注意力**: 0.18M参数 (21.2%)
-- **分类器**: 0.03M参数 (3.5%)
+### 📈 **Model Parameter Statistics**
+- **Total parameters**: ~0.85M (memory-optimized version)
+- **Channel attention**: 84 params (0.01%)
+- **BiLSTM**: 0.64M params (75.5%)
+- **Temporal attention**: 0.18M params (21.2%)
+- **Classifier**: 0.03M params (3.5%)
 
-### 🔧 **数据增强**（可配置）
-- **Mixup**: 同batch内按Beta(α,α)线性混合生成软目标
-- **SpecAugment**: 随机时间段/特征频段置零，模拟信号丢失
-- **噪声扰动**: 对特征施加小幅高斯噪声
-- **当前配置**: 所有增强已关闭以节省内存
-
----
-
-## 七、指标与后处理
-
-- IoU 匹配：pred 与 gt 片段的区间 IoU≥阈值且类别一致 → TP；未匹配的 pred 为 FP，未匹配的 gt 为 FN。
-- P/R/F1：按累计 TP/FP/FN 计算；支持多 IoU（`--ious`）。
-- FA/h：`FP / 总小时`，用于误报警率控制（阈值网格时可用 `--max_fa_per_hour` 约束）。
-- 起止延迟：匹配对的 |Δonset| / |Δoffset| 平均。
-- 后处理流水：平滑 → 二值化 → 确认窗过滤 → 冷却合并 → 最小时长过滤；片段类别以帧概率和（或最大）取主类。
-
-### 汇总口径（LOSOCV）
-- 宏平均（macro）：对各折指标（P/R/F1）做简单平均，公平反映跨受试者泛化。
-- 微平均（micro）：累加 TP/FP/FN 与总时长计算整体 P/R/F1 与 FA/h，反映总体运行点。
-
-汇总文件：`outputs/losocv/loso_eval_aggregate.json`。
+### 🔧 **Data Augmentation** (configurable)
+- **Mixup**: linearly mixes samples within a batch using Beta(α,α) to generate soft targets
+- **SpecAugment**: randomly zeroes out time segments/feature bands to simulate signal loss
+- **Noise perturbation**: applies small Gaussian noise to features
+- **Current configuration**: all augmentations disabled to save memory
 
 ---
 
-## 八、项目结构
+## 7. Metrics and Postprocessing
 
-- `src/edf_reader.py`：EDF 读取、滤波/陷波、重采样、对齐
-- `src/features.py`：谱功率与时域特征
-- `src/dataset.py`：数据集与 `.npz` 缓存
-- `src/model.py`：`BiLSTMClassifier`
-- `src/postprocess.py`：平滑/确认/冷却/时长过滤
-- `src/metrics.py`：IoU 匹配、P/R/F1、FA/h、延迟
-- `src/scan_thresholds.py`：阈值网格、FA/h 约束、写回配置
-- `src/eval.py`：从 checkpoint 评估，输出 JSON/CSV
-- `src/train.py`：训练（配置、日志、TB、scheduler、augment、checkpoint）
-- `configs/config.yaml`：配置模板
-- `data/`、`data_cache/`、`outputs/`：数据/缓存/结果目录（已忽略）
+- IoU matching: a predicted segment and a ground-truth segment are matched (TP) if their interval IoU ≥ threshold and the classes match; unmatched predictions are FP, unmatched ground truth are FN.
+- P/R/F1: computed from accumulated TP/FP/FN; supports multiple IoU thresholds (`--ious`).
+- FA/h: `FP / total hours`, used to control the false-alarm rate (can be constrained via `--max_fa_per_hour` during threshold grid search).
+- Onset/offset latency: average |Δonset| / |Δoffset| over matched pairs.
+- Postprocessing pipeline: smoothing → binarization → confirmation-window filtering → cooldown merging → minimum-duration filtering; a segment's class is chosen as the one with the largest summed (or max) frame probability.
+
+### Aggregation Conventions (LOSOCV)
+- Macro average: a simple average of each fold's metrics (P/R/F1), fairly reflecting generalization across subjects.
+- Micro average: accumulates TP/FP/FN and total duration to compute overall P/R/F1 and FA/h, reflecting the overall operating point.
+
+Aggregate file: `outputs/losocv/loso_eval_aggregate.json`.
 
 ---
 
-## 九、OOM内存溢出解决方案详解
+## 8. Project Structure
 
-### 🚨 **问题背景**
+- `src/edf_reader.py`: EDF reading, filtering/notch, resampling, alignment
+- `src/features.py`: spectral power and time-domain features
+- `src/dataset.py`: dataset and `.npz` caching
+- `src/model.py`: `BiLSTMClassifier`
+- `src/postprocess.py`: smoothing/confirmation/cooldown/duration filtering
+- `src/metrics.py`: IoU matching, P/R/F1, FA/h, latency
+- `src/scan_thresholds.py`: threshold grid search, FA/h constraint, config write-back
+- `src/eval.py`: evaluation from a checkpoint, outputs JSON/CSV
+- `src/train.py`: training (config, logging, TensorBoard, scheduler, augmentation, checkpointing)
+- `configs/config.yaml`: configuration template
+- `data/`, `data_cache/`, `outputs/`: data/cache/results directories (ignored by git)
 
-EEG数据具有以下特点导致OOM问题：
-- **长序列**: 单个EEG文件可达数小时，产生数万帧特征
-- **多通道**: 通常20个通道同时记录
-- **高采样率**: 256Hz采样率产生大量数据点
-- **批处理**: 多个长序列同时加载到内存
+---
 
-### ✅ **内置OOM保护机制**
+## 9. OOM (Out-of-Memory) Solutions in Detail
 
-#### **1. 智能批处理优化**
+### 🚨 **Background**
+
+EEG data has the following characteristics that lead to OOM issues:
+- **Long sequences**: a single EEG file can span several hours, producing tens of thousands of feature frames
+- **Multiple channels**: typically 20 channels recorded simultaneously
+- **High sampling rate**: 256Hz sampling produces a large number of data points
+- **Batching**: multiple long sequences loaded into memory at once
+
+### ✅ **Built-in OOM Protection Mechanisms**
+
+#### **1. Smart Batching Optimization**
 ```python
-# 自动序列长度限制
-MAX_SEQUENCE_LENGTH = 8000  # 约33分钟，防止单序列过长
+# Automatic sequence-length limiting
+MAX_SEQUENCE_LENGTH = 8000  # about 33 minutes, prevents a single sequence from being too long
 
-# 内存预检查
+# Memory pre-check
 estimated_memory_mb = (batch_size * max_seq_len * features * 4) / (1024 * 1024)
-if estimated_memory_mb > 800:  # 超过800MB自动调整
-    # 动态缩减序列长度
+if estimated_memory_mb > 800:  # auto-adjust if over 800MB
+    # dynamically shrink sequence length
 ```
 
-#### **2. 梯度累积技术**
+#### **2. Gradient Accumulation**
 ```bash
-# 等效大批次训练，但内存友好
-batch_size: 2                    # 实际批次大小
-gradient_accumulation_steps: 2   # 累积2步 = 等效batch_size=4
+# Effectively trains with a large batch size, but memory-friendly
+batch_size: 2                    # actual batch size
+gradient_accumulation_steps: 2   # accumulate 2 steps = effective batch_size of 4
 ```
 
-#### **3. 内存监控和自动清理**
+#### **3. Memory Monitoring and Automatic Cleanup**
 ```python
-# 训练中自动监控GPU内存
+# Automatically monitors GPU memory during training
 if memory_used_gb > 6.0:
-    torch.cuda.empty_cache()  # 自动清理
+    torch.cuda.empty_cache()  # automatic cleanup
 
-# OOM异常捕获和恢复
+# OOM exception catching and recovery
 except RuntimeError as e:
     if "out of memory" in str(e):
-        # 自动跳过问题批次，继续训练
+        # automatically skip the problematic batch and continue training
 ```
 
-#### **4. 特征提取优化**
+#### **4. Feature Extraction Optimization**
 ```python
-# 预分配数组，避免动态增长
+# Pre-allocate arrays to avoid dynamic growth
 X = np.zeros((n_frames, n_features), dtype=np.float32)
 
-# 及时释放临时变量
+# Free temporary variables promptly
 del psd_array, seg, rms
 ```
 
-### 🎛️ **内存配置级别**
+### 🎛️ **Memory Configuration Levels**
 
-#### **Level 1: 标准配置（8GB+ 内存）**
+#### **Level 1: Standard Configuration (8GB+ memory)**
 ```bash
 python -m src.train --config configs/config.yaml
 # batch_size=2, gradient_accumulation_steps=2, num_workers=1
 ```
 
-#### **Level 2: 节约配置（4-8GB 内存）**
+#### **Level 2: Conservative Configuration (4-8GB memory)**
 ```bash
 python -m src.train --batch_size 1 --gradient_accumulation_steps 4 --num_workers 0
 ```
 
-#### **Level 3: 极限配置（<4GB 内存）**
+#### **Level 3: Extreme Configuration (<4GB memory)**
 ```bash
 python -m src.train --batch_size 1 --gradient_accumulation_steps 1 --num_workers 0 --epochs 5
 ```
 
-### 📊 **优化效果对比**
+### 📊 **Optimization Results Comparison**
 
-| 配置项 | 优化前 | 优化后 | 内存节省 |
+| Setting | Before | After | Memory Saved |
 |--------|--------|--------|----------|
-| 批次大小 | 4 | 2 | 50% |
-| 序列长度 | 无限制 | 8000帧 | 70% |
-| 多进程 | 4 workers | 1 worker | 75% |
-| 预计算 | first_batch | none | 30% |
-| 总体效果 | 16GB+ | 3-6GB | **60-80%** |
+| Batch size | 4 | 2 | 50% |
+| Sequence length | unlimited | 8000 frames | 70% |
+| Multiprocessing | 4 workers | 1 worker | 75% |
+| Precomputation | first_batch | none | 30% |
+| Overall effect | 16GB+ | 3-6GB | **60-80%** |
 
-### 🔧 **故障排除**
+### 🔧 **Troubleshooting**
 
-#### **仍然遇到OOM？**
+#### **Still hitting OOM?**
 ```bash
-# 1. 检查序列长度分布
+# 1. Check the sequence-length distribution
 python -c "
 from src.utils import pair_edf_tse
 from src.dataset import SequenceDataset
 pairs = pair_edf_tse('data/Dataset_train_dev')[:5]
 for edf, tse, rec in pairs:
-    print(f'{rec}: 长度待检查')
+    print(f'{rec}: length to check')
 "
 
-# 2. 使用最保守配置
+# 2. Use the most conservative configuration
 python -m src.train \
   --batch_size 1 \
   --gradient_accumulation_steps 1 \
   --num_workers 0 \
   --epochs 3
 
-# 3. 监控内存使用
-# 训练时观察输出中的内存警告信息
+# 3. Monitor memory usage
+# Watch for the memory-warning messages in the training output
 ```
 
-#### **性能优化建议**
-- ✅ 使用GPU加速（如果可用）
-- ✅ 启用混合精度训练（自动检测）
-- ✅ 合理设置 `num_workers`（Windows建议1，Linux可以2-4）
-- ✅ 监控 `data_cache/` 大小，定期清理
+#### **Performance Tips**
+- ✅ Use GPU acceleration if available
+- ✅ Enable mixed-precision training (auto-detected)
+- ✅ Set `num_workers` sensibly (1 is recommended on Windows, 2-4 on Linux)
+- ✅ Monitor the size of `data_cache/` and clean it up periodically
 
 ---
 
-## 十、常见问题（FAQ）
+## 10. FAQ
 
-### 🔧 **安装问题**
-- **SciPy/pyEDFlib 安装失败**：建议在 conda 环境下安装相应二进制包；或使用与 Python 版本匹配的 whl。
-- **torch 模块找不到**：确保已激活虚拟环境 `conda activate EEG_work`
+### 🔧 **Installation Issues**
+- **SciPy/pyEDFlib install fails**: it's recommended to install the corresponding binary packages inside a conda environment, or use a wheel that matches your Python version.
+- **`torch` module not found**: make sure you've activated the virtual environment with `conda activate EEG_work`
 
-### 💾 **内存/OOM问题**
-- **训练OOM**: 本项目已内置OOM保护，如仍有问题：
+### 💾 **Memory/OOM Issues**
+- **Training OOM**: this project has built-in OOM protection; if problems persist:
   ```bash
-  # 最小内存配置
+  # Minimum-memory configuration
   python -m src.train --batch_size 1 --gradient_accumulation_steps 4 --num_workers 0
   ```
-- **特征提取OOM**: 删除 `data_cache/*.npz` 重新生成，使用优化后的特征提取
-- **GPU内存不足**: 自动启用CPU训练，或使用 `memory_efficient=True` 模式
+- **Feature extraction OOM**: delete `data_cache/*.npz` and regenerate using the optimized feature extraction
+- **Insufficient GPU memory**: CPU training is enabled automatically, or use `memory_efficient=True` mode
 
-### 🪟 **Windows特有问题**
-- **多行命令执行失败**: Windows PowerShell不支持 `\` 续行，使用单行命令或反引号续行：
+### 🪟 **Windows-Specific Issues**
+- **Multi-line commands fail**: Windows PowerShell doesn't support `\` line continuation; use a single-line command, or the backtick for continuation:
   ```powershell
-  # 正确的PowerShell语法
+  # Correct PowerShell syntax
   python -m src.losocv `
       --config configs/config.yaml `
       --run_train --batch_size 2
   ```
-- **环境激活**: 每次打开终端都需要 `conda activate EEG_work`
+- **Environment activation**: `conda activate EEG_work` is needed every time you open a terminal
 
-### 📊 **训练和评估问题**
-- **LOSOCV中断续训**: 使用 `--resume` 参数自动从断点继续
-- **指标异常**：
-  - 检查 `bg_label` 是否与数据一致
-  - 确认 TSE 解析与时间单位
-  - 查验后处理阈值是否已写回并被评估脚本正确加载
-- **缓存冲突**: 修改特征/滤波参数后建议删除旧的 `data_cache/*.npz` 以免混用
+### 📊 **Training and Evaluation Issues**
+- **LOSOCV interrupted, resuming training**: use the `--resume` flag to automatically continue from the checkpoint
+- **Metrics look wrong**:
+  - Check whether `bg_label` matches the data
+  - Confirm the TSE parsing and time units
+  - Verify that the postprocessing threshold has been written back and is correctly loaded by the evaluation script
+- **Cache conflicts**: after changing feature/filter parameters, it's recommended to delete the old `data_cache/*.npz` files to avoid mixing them up
 
-### 🎯 **性能优化建议**
-- **训练太慢**: 使用 `--progress bar` 查看进度，确保GPU/CUDA可用
-- **数据加载慢**: 检查 `num_workers` 设置，Windows建议设为1
-- **内存使用监控**: 训练时会自动显示内存警告和使用情况
+### 🎯 **Performance Tips**
+- **Training too slow**: use `--progress bar` to see progress, and make sure GPU/CUDA is available
+- **Data loading slow**: check the `num_workers` setting; 1 is recommended on Windows
+- **Memory-usage monitoring**: memory warnings and usage info are shown automatically during training
 
 ---
 
-## 十一、许可与致谢
+## 11. License and Acknowledgments
 
-- 许可：见根目录 `LICENSE`。
-- 致谢：感谢开源社区（pyEDFlib、SciPy、PyTorch、TensorBoard 等）提供的生态支持。
- - 数据集：感谢 Temple University Hospital Seizure Corpus（TUSZ）提供的数据与标注，参考其[官方主页](https://www.isip.piconepress.com/projects/tuh_eeg/html/downloads.shtml)。
+- License: see `LICENSE` in the repository root.
+- Acknowledgments: thanks to the open-source community (pyEDFlib, SciPy, PyTorch, TensorBoard, etc.) for their ecosystem support.
+ - Dataset: thanks to the Temple University Hospital Seizure Corpus (TUSZ) for the data and annotations; see their [official homepage](https://www.isip.piconepress.com/projects/tuh_eeg/html/downloads.shtml).

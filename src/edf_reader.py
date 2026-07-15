@@ -20,7 +20,7 @@ def _butter_bandpass_sos(
 	fs: float,
 	order: int = 4,
 ) -> Optional[np.ndarray]:
-	# 若均为 None 则不构造滤波器
+	# If both are None, don't build a filter
 	if lowcut is None and highcut is None:
 		return None
 	if fs is None:
@@ -66,14 +66,14 @@ def load_edf(
 	notch_hz: Optional[float] = None,
 	notch_q: float = 30.0,
 ) -> Tuple[np.ndarray, List[str], float]:
-	"""读取 EDF 并返回 (signals [C,N], channel_names, fs)。"""
+	"""Read an EDF file and return (signals [C,N], channel_names, fs)."""
 	with pyedflib.EdfReader(filepath) as r:
 		n_sig = r.signals_in_file
 		ch_names = [r.getLabel(i) for i in range(n_sig)]
 		ch_fs = [float(r.getSampleFrequency(i)) for i in range(n_sig)]
 		raw = [r.readSignal(i).astype(np.float32) for i in range(n_sig)]
 
-	# 选择目标采样率
+	# Choose the target sampling rate
 	if resample_hz is None:
 		values, counts = np.unique(np.asarray(ch_fs), return_counts=True)
 		resample_fs = float(values[np.argmax(counts)]) if len(values) else float(ch_fs[0])
@@ -85,20 +85,20 @@ def load_edf(
 
 	proc_channels: List[np.ndarray] = []
 	for x, fs in zip(raw, ch_fs):
-		# 去直流
+		# Remove DC offset
 		x = x - float(np.nanmean(x))
 		cur_fs = float(fs)
 		if abs(cur_fs - resample_fs) > 1e-6:
-			# 近似整数比重采样
+			# Resample using an approximate integer ratio
 			num = int(round(resample_fs))
 			den = int(round(cur_fs))
 			g = np.gcd(num, den) or 1
 			x = resample_poly(x, num // g, den // g).astype(np.float32)
-		# 形状 [N] -> [1, N] 以便逐通道滤波
+		# Shape [N] -> [1, N] to allow per-channel filtering
 		x = x[None, :]
-		# 陷波
+		# Notch filter
 		x = _apply_notch(x, fs=resample_fs, notch_hz=notch_hz, q=notch_q)
-		# 带通/高通/低通
+		# Bandpass/highpass/lowpass
 		if sos is not None:
 			x = sosfiltfilt(sos, x, axis=1)
 		proc_channels.append(x[0])

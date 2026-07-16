@@ -9,19 +9,33 @@ import numpy as np
 
 
 def pair_edf_tse(data_dir: str) -> List[Tuple[str, Optional[str], str]]:
-	"""Scan the directory and pair up .edf and .tse files by record_id.
-	Returns (edf_path, tse_path_or_None, record_id).
+	"""Scan a directory (including subdirectories) and pair up .edf and .tse
+	files by record_id. Returns (edf_path, tse_path_or_None, record_id).
+
+	Supports two layouts:
+	- Flat directory (TUSZ style): all .edf/.tse files live directly under data_dir;
+	- Per-patient subdirectories (CHB-MIT style): data_dir/chb01/chb01_03.edf etc.
+	  Both layouts are scanned recursively, and record_id is taken from the
+	  filename (without extension), so all .edf filenames used in a given
+	  training run must be unique (CHB-MIT's chbXX_YY naming naturally
+	  satisfies this).
 	"""
-	files = os.listdir(data_dir)
-	edfs = {}
-	tses = {}
-	for name in files:
-		base, ext = os.path.splitext(name)
-		path = os.path.join(data_dir, name)
-		if ext.lower() == ".edf":
-			edfs[base] = path
-		elif ext.lower() == ".tse":
-			tses[base] = path
+	edfs: Dict[str, str] = {}
+	tses: Dict[str, str] = {}
+	for root, _dirs, files in os.walk(data_dir, followlinks=True):
+		for name in files:
+			base, ext = os.path.splitext(name)
+			path = os.path.join(root, name)
+			ext_l = ext.lower()
+			if ext_l == ".edf":
+				if base in edfs:
+					raise ValueError(
+						f"duplicate record_id '{base}': {edfs[base]} and {path} share the "
+						"same basename; make sure all .edf filenames under data_dir are unique."
+					)
+				edfs[base] = path
+			elif ext_l == ".tse":
+				tses[base] = path
 	pairs: List[Tuple[str, Optional[str], str]] = []
 	for base, edf_path in edfs.items():
 		pairs.append((edf_path, tses.get(base), base))
@@ -62,8 +76,23 @@ def load_json(path: str):
 
 
 def parse_patient_id(record_id: str) -> str:
+	"""Extract the patient ID from a record_id, used for patient-level splits
+	and LOSOCV grouping.
+
+	Supports:
+	- TUSZ style: '00000001_s001_t000' -> '00000001'
+	- CHB-MIT style: 'chb01_03' -> 'chb01' (case-insensitive; tolerates a small
+	  number of variant suffixes like 'chb01a_03'. Note e.g. chb21 is a
+	  companion record to chb01 but lives under a different directory name,
+	  so it is intentionally NOT merged into the same patient group.)
+	"""
 	m = re.match(r"^(\d{8})_", record_id)
-	return m.group(1) if m else record_id
+	if m:
+		return m.group(1)
+	m = re.match(r"^(chb\d+)", record_id, re.IGNORECASE)
+	if m:
+		return m.group(1).lower()
+	return record_id
 
 
 def split_records_by_patient(
@@ -122,7 +151,7 @@ def merge_non_background_segments(
 			end = i - 1
 			dur = frame_centers_sec[end] - frame_centers_sec[start]
 			if dur >= min_duration_sec:
-				# Majority class
+				# majority class
 				sum_probs = probs[start:end + 1].sum(axis=0)
 				cls = int(np.argmax(sum_probs))
 				segments.append({
@@ -148,8 +177,8 @@ def merge_non_background_segments(
 
 
 def normalize_label_with_alias(label: str, aliases: Optional[Dict[str, str]]) -> str:
-	"""Normalize a label name using the alias table (case-insensitive). Returns it unchanged if not found."""
+	"""Normalize a label name using an alias table (case-insensitive). Returns
+	the label unchanged if no alias is found."""
 	if not aliases:
 		return label
 	return aliases.get(label.lower(), label)
-

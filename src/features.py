@@ -24,7 +24,7 @@ def _bandpower_from_psd(freqs: np.ndarray, psd: np.ndarray, band: Tuple[float, f
 	idx = np.logical_and(freqs >= band[0], freqs < band[1])
 	if not np.any(idx):
 		return np.zeros(psd.shape[:-1], dtype=psd.dtype)
-	return np.trapz(psd[..., idx], freqs[idx], axis=-1)
+	return np.trapezoid(psd[..., idx], freqs[idx], axis=-1)
 
 
 def extract_features_multichannel(

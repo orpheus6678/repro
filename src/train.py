@@ -776,6 +776,12 @@ def main():
 				seen_recs.update(rec_ids)
 				x = x.float().to(device, non_blocking=True)
 				y = y.to(device, non_blocking=True)
+
+				# 🔍 diagnostic: catch bad input features before they ever reach the model
+				if torch.isnan(x).any() or torch.isinf(x).any():
+					print(f"⚠️ bad input features in record(s) {rec_ids}: "
+					      f"nan={torch.isnan(x).any().item()}, inf={torch.isinf(x).any().item()}")
+					continue
 				
 				# 🔥 OOM fix: memory check
 				if torch.cuda.is_available():

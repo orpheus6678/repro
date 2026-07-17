@@ -1,95 +1,88 @@
 train:
-  # Root data directory used for training/evaluation; must contain .edf files with matching .tse files
-  data_dir: data/Dataset_train_dev
-  # Feature cache directory (auto-generates .npz files to speed up reuse)
+  # Root of the CHB-MIT dataset (contains chb01/, chb02/, ... subfolders).
+  # First run `python -m src.chbmit_prepare --data_dir <this path>` once to
+  # generate .tse annotations, then point this at that same path (the script
+  # writes .tse files in place; it never moves/copies the .edf files).
+  data_dir: data/chb-mit-scalp-eeg-database-1.0.0
+  # Feature cache directory (auto-generated .npz files, sped up on reuse)
   cache_dir: data_cache
   # Feature sliding-window length (seconds)
   window_sec: 2.0
-  # Feature sliding-window hop length (seconds)
+  # Feature sliding-window hop (seconds)
   hop_sec: 0.25
-  # Sampling rate to resample to uniformly after reading the EDF (Hz)
+  # CHB-MIT's native sampling rate is already 256Hz, so keep it as-is (no resampling)
   resample_hz: 256.0
-  # Preprocessing bandpass/highpass/lowpass range (None means disabled); default is the common EEG range 0.5-45Hz
+  # Preprocessing bandpass range (Hz); 0.5-45Hz is a common EEG choice
   bandpass: [0.5, 45.0]
-  # Mains notch filter (50 or 60; None means disabled)
-  notch_hz: 50.0
-  # Background class label name (must match `.tse` or be mappable via the alias table)
+  # Mains notch filter: CHB-MIT was recorded at Boston Children's Hospital (US),
+  # where mains frequency is 60Hz (TUSZ's default of 50Hz does not apply here)
+  notch_hz: 60.0
+  # Background class label name; must match the "bckg" label produced by
+  # chbmit_prepare.py in the generated .tse files
   bg_label: bckg
-  
-  # 🔧 Memory optimization: extremely low batch_size to avoid OOM
-  batch_size: 1  # Lowered further to 1; consider gradient accumulation if needed
-  # Number of training epochs
+
+  # memory optimization: very small batch_size to avoid OOM (a single CHB-MIT
+  # recording can run up to an hour, producing a lot of frames)
+  batch_size: 1
+  # number of training epochs
   epochs: 20
-  # Validation ratio (only used for the non-LOSOCV random per-patient split flow; not used by the LOSO flow)
+  # validation ratio (split by patient; not used by the LOSOCV pipeline)
   val_ratio: 0.2
-  # Random seed
+  # random seed
   seed: 42
-  # Output directory (logs/weights/TensorBoard)
+  # output directory (logs / weights / TensorBoard)
   out_dir: outputs
-  
-  # 🔧 Memory optimization: lower concurrency to reduce memory usage
-  num_workers: 0  # Lowered to 0 to avoid multiprocessing memory overhead
-  # Caching strategy: disable precomputation to reduce memory usage
-  precompute_cache: none  # Precomputation disabled to reduce memory usage
-  # Terminal training-progress display (none|bar) and log interval (per-iteration logging is off by default; epoch summaries are always printed)
+
+  # memory optimization: fewer workers to reduce memory usage
+  num_workers: 0
+  precompute_cache: none
   progress: bar
   log_interval: 0
-  # Show a cache-building progress bar for the current fold's training set (requires progress: bar)
   cache_progress: true
-  # Whether to run one baseline validation pass before training starts (off by default)
   eval_at_start: false
-  # Default learning-rate scheduling and data-augmentation settings
-  # scheduler: learning-rate scheduling strategy (none|cosine|onecycle)
-  scheduler: onecycle  # none|cosine|onecycle
-  # 🚀 Attention-mechanism optimization: learning rate raised somewhat
-  max_lr: 0.0003  # Attention-based training is stable, so the learning rate can be raised
-  # If labels doesn't configure an Excel/labels.json, the label set is auto-derived from the TSE files
+
+  scheduler: onecycle
+  max_lr: 0.0003
+  # CHB-MIT only needs binary classification (seiz vs bckg) and has no Excel
+  # label sheets, so let the training script auto-scan the .tse files for the
+  # "seiz" label and build the class set from that plus bg_label.
+  # NOTE: do not add a `labels:` block to this file (not even just json_out),
+  # or it will bypass this auto-derivation logic and instead require you to
+  # provide Excel sheets / labels.json explicitly.
   auto_labels_from_tse: true
-  # 🔧 Memory optimization: increase gradient accumulation to compensate for the very small batch size
-  gradient_accumulation_steps: 8  # Simulates the effect of batch_size=8
-  # Gradient clipping threshold (0 means no clipping)
+  gradient_accumulation_steps: 8
   clip_grad: 1.0
-  
-  # 🧠 Memory optimization: reduced model parameters to avoid OOM
-  # Model architecture parameters
-  hidden_dim: 128  # Reduced hidden dimension to lower memory usage
-  num_layers: 2    # Reduced number of LSTM layers to lower parameter count
-  attention_heads: 4  # Reduced number of attention heads
-  use_attention: true  # Keep the attention mechanism enabled
-  dropout: 0.15    # Keep dropout to prevent overfitting
-  # 🔥 OOM fix: reduced data augmentation
-  mixup_alpha: 0.0  # Changed from 0.2 to 0.0, disabling mixup to save memory
-  # SpecAugment: time-dimension mask ratio and number of masks
-  spec_time_mask_ratio: 0.0  # Changed from 0.1 to 0.0
-  spec_time_masks: 0  # Changed from 1 to 0
-  # SpecAugment: feature-dimension mask ratio and number of masks
-  spec_feat_mask_ratio: 0.0  # Changed from 0.1 to 0.0
-  spec_feat_masks: 0  # Changed from 1 to 0
-  # Feature-level Gaussian noise standard deviation
-  aug_noise_std: 0.0  # Changed from 0.01 to 0.0
-  # Frame labeling: window-label overlap ratio threshold (e.g. 0.2 means a window must overlap a segment by >=20% to be labeled that class)
+
+  # model architecture parameters (kept at the same memory-optimized settings;
+  # CHB-MIT channel counts vary by patient/montage, but the feature layer
+  # already aggregates every frame's features down to a fixed 14-dim vector,
+  # so differing channel counts don't affect the model's input dimension)
+  hidden_dim: 128
+  num_layers: 2
+  attention_heads: 4
+  use_attention: true
+  dropout: 0.15
+  mixup_alpha: 0.0
+  spec_time_mask_ratio: 0.0
+  spec_time_masks: 0
+  spec_feat_mask_ratio: 0.0
+  spec_feat_masks: 0
+  aug_noise_std: 0.0
+  # frame labeling: overlap-ratio threshold between a window and a seizure segment
   label_overlap_ratio: 0.2
-  # Frame labeling: ignore seizure segments shorter than this duration (seconds)
+  # ignore seizure segments shorter than this duration (seconds); CHB-MIT
+  # annotations are usually clean already, so this can stay at 0
   min_seg_duration: 0.0
 
 postprocess:
-  # Foreground decision probability threshold (based on 1 - p(background))
   prob: 0.8
-  # Foreground-probability smoothing window length (seconds); 0 means no smoothing
   smooth: 0.25
-  # Number of consecutive windows required to confirm an event (>=1)
   confirm: 2
-  # Cooldown merge time for adjacent same-class segments (seconds)
   cooldown: 0.5
-  # Minimum event duration (seconds); shorter events are discarded
   min_duration: 0.0
 
-labels:
-  # Background class name (should match train.bg_label)
-  background: bckg
-  # Seizure-type table (canonical name - alias); the first two columns of each row in the first worksheet are read as (label, alias)
-  excel_types: data/Seizure_Types.xlsx
-  # Period-type table (optional, same rules as above)
-  excel_periods: data/Seizure_Periods.xlsx
-  # Label set and alias mapping exported after parsing the Excel files (shared by training and evaluation)
-  json_out: outputs/labels.json
+# Note: this file deliberately has no `labels:` block -- see the
+# auto_labels_from_tse note above. If you later want multi-class typing
+# (rather than just binary seiz/bckg), refer to the `labels:` block in the
+# original configs/config.yaml and supply your own Excel sheets or hand-write
+# outputs_chbmit/labels.json.
